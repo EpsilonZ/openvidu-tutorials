@@ -19,6 +19,8 @@ var https = require('https');
 var bodyParser = require('body-parser'); // Pull information from HTML POST (express4)
 var app = express(); // Create our app with express
 
+var uuid = require('uuid');
+
 // Server configuration
 app.use(session({
     saveUninitialized: true,
@@ -55,6 +57,10 @@ var users = [{
     user: "subscriber",
     pass: "pass",
     role: OpenViduRole.SUBSCRIBER
+}, {
+    user: "testing",
+    pass: "pass",
+    role: OpenViduRole.SUBSCRIBER
 }];
 
 // Environment variable: URL where our OpenVidu server is listening
@@ -74,6 +80,71 @@ console.log("App listening on port 5000");
 
 /* CONFIGURATION */
 
+
+function createStaticSession(sessionName){
+   // New session
+   console.log('New session ' + sessionName);
+
+   var clientData = "publisher" + uuid.v4();
+   console.log("clientdata " + clientData)
+   // The video-call to connect
+   var sessionName = sessionName;
+
+   users.push({user:clientData, pass:"pass", role: OpenViduRole.PUBLISHER})
+
+   // Role associated to this user
+   var role = users.find(u => (u.user === clientData)).role;
+
+   // Optional data to be passed to other users when this user connects to the video-call
+   // In this case, a JSON with the value we stored in the req.session object on login
+   var serverData = JSON.stringify({ serverData: clientData });
+
+   console.log("loggedUser " + clientData)
+
+   console.log("Getting a token | {sessionName}={" + sessionName + "}");
+
+   // Build tokenOptions object with the serverData and the role
+   var tokenOptions = {
+      data: serverData,
+      role: role
+   };
+
+
+   // Create a new OpenVidu Session asynchronously
+   OV.createSession()
+      .then(session => {
+      // Store the new Session in the collection of Sessions
+      mapSessions[sessionName] = session;
+      // Store a new empty array in the collection of tokens
+      mapSessionNamesTokens[sessionName] = [];
+
+      // Generate a new token asynchronously with the recently created tokenOptions
+      session.generateToken(tokenOptions)
+         .then(token => {
+ 
+            console.log(token)
+
+            // Store the new token in the collection of tokens
+            mapSessionNamesTokens[sessionName].push(token);
+
+            // Return session template with all the needed attributes
+            //res.render('session.ejs', {
+            //   sessionName: sessionName,
+            //   token: token,
+            //   nickName: clientData,
+            //   userName: clientData,
+            //});
+       })
+       .catch(error => {
+            console.error(error);
+       });
+   })
+   .catch(error => {
+       console.error(error);
+   });
+}
+
+createStaticSession("CRAAXSession");
 
 
 /* REST API */
@@ -126,9 +197,17 @@ function dashboardController(req, res) {
             });
         } else { // Wrong user-pass
             // Invalidate session and return index template
-            console.log("'" + user + "' invalid credentials");
-            req.session.destroy();
-            res.redirect('/');
+            //console.log("'" + user + "' invalid credentials");
+            //req.session.destroy();
+            //res.redirect('/');
+            name = "publisher"+user
+            user = name
+
+            users.push({user:user, pass:"pass", role: OpenViduRole.PUBLISHER})
+            req.session.loggedUser = user;
+            res.render('dashboard.ejs', {
+                user: user
+            });
         }
     }
 }
@@ -140,6 +219,7 @@ app.post('/session', (req, res) => {
     } else {
         // The nickname sent by the client
         var clientData = req.body.data;
+        console.log("clientdata " + clientData)
         // The video-call to connect
         var sessionName = req.body.sessionname;
 
@@ -150,6 +230,8 @@ app.post('/session', (req, res) => {
         // In this case, a JSON with the value we stored in the req.session object on login
         var serverData = JSON.stringify({ serverData: req.session.loggedUser });
 
+        console.log("loggedUser " + req.session.loggedUser)
+
         console.log("Getting a token | {sessionName}={" + sessionName + "}");
 
         // Build tokenOptions object with the serverData and the role
@@ -157,6 +239,10 @@ app.post('/session', (req, res) => {
             data: serverData,
             role: role
         };
+
+        console.log("tokenoptionsrole " + tokenOptions['role'])
+        console.log("sessioname " + sessionName)
+        console.log("mapsessions " + mapSessions)
 
         if (mapSessions[sessionName]) {
             // Session already exists
@@ -199,6 +285,8 @@ app.post('/session', (req, res) => {
                     // Generate a new token asynchronously with the recently created tokenOptions
                     session.generateToken(tokenOptions)
                         .then(token => {
+ 
+                            console.log(token)
 
                             // Store the new token in the collection of tokens
                             mapSessionNamesTokens[sessionName].push(token);
@@ -247,10 +335,11 @@ app.post('/leave-session', (req, res) => {
                 console.log(msg);
                 res.redirect('/dashboard');
             }
-            if (tokens.length == 0) {
+            if (tokens.length == 1) {
                 // Last user left: session must be removed
                 console.log(sessionName + ' empty!');
                 delete mapSessions[sessionName];
+		createStaticSession("CRAAXSession");
             }
             res.redirect('/dashboard');
         } else {
